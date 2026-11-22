@@ -1,0 +1,1493 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>LCS: EQuest 3D — Симулятор Конного Спорта</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Tone.js для процедурного звука без внешних ссылок -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <!-- Шрифт Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+            font-family: 'Inter', sans-serif;
+        }
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #1e293b;
+        }
+        #gameCanvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            touch-action: none;
+        }
+        /* Стеклянный UI в стиле современных конных симуляторов */
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.72);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+        }
+        .glass-btn {
+            background: linear-gradient(135deg, rgba(255,255,255,0.14), rgba(255,255,255,0.05));
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .glass-btn:hover {
+            background: linear-gradient(135deg, rgba(255,255,255,0.24), rgba(255,255,255,0.1));
+            transform: translateY(-2px);
+        }
+        .glass-btn:active {
+            transform: scale(0.95);
+        }
+        .glass-btn.active {
+            background: linear-gradient(135deg, #f59e0b, #d97706);
+            border-color: #fbbf24;
+            color: #fff;
+            box-shadow: 0 0 18px rgba(245, 158, 11, 0.45);
+        }
+        /* Анимация уведомлений */
+        @keyframes slideDown {
+            from { opacity: 0; transform: translate(-50%, -20px); }
+            to { opacity: 1; transform: translate(-50%, 0); }
+        }
+        .toast-anim {
+            animation: slideDown 0.3s ease-out forwards;
+        }
+        /* Полоса шкалы темпа прыжка */
+        .stride-marker {
+            transition: left 0.05s linear;
+        }
+    </style>
+</head>
+<body class="text-slate-100">
+
+    <!-- 3D Холст -->
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- Стартовый экран / Меню входа -->
+    <div id="startScreen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4">
+        <div class="glass-panel max-w-lg w-full rounded-3xl p-6 sm:p-8 text-center border border-amber-500/30">
+            <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-amber-400 to-amber-600 text-slate-950 text-3xl mb-4 shadow-lg shadow-amber-500/30">
+                🐎
+            </div>
+            <h1 class="text-3xl sm:text-4xl font-extrabold tracking-tight text-white mb-2">
+                LCS: <span class="text-amber-400">EQuest 3D</span>
+            </h1>
+            <p class="text-slate-300 text-sm sm:text-base mb-6 leading-relaxed">
+                Реалистичный симулятор конного клуба! Ухаживайте за лошадью на развязках, седлайте её, настраивайте масть и проходите маршруты конкура с расчётом темпа прыжка.
+            </p>
+            <div class="grid grid-cols-3 gap-2 text-xs text-slate-300 mb-6 bg-slate-900/60 p-3 rounded-2xl border border-white/5">
+                <div><span class="block text-amber-400 font-bold text-sm">1. Развязки</span>Чистка и амуниция</div>
+                <div><span class="block text-emerald-400 font-bold text-sm">2. Аллюры</span>Шаг • Рысь • Галоп</div>
+                <div><span class="block text-sky-400 font-bold text-sm">3. Конкур</span>Тайминг темпов</div>
+            </div>
+            <button id="startBtn" class="w-full py-4 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-extrabold text-lg shadow-xl shadow-amber-500/25 transition transform hover:scale-[1.02] active:scale-95">
+                Войти в конный клуб
+            </button>
+        </div>
+    </div>
+
+    <!-- Всплывающее уведомление (вместо alert) -->
+    <div id="toastBox" class="fixed top-20 left-1/2 -translate-x-1/2 z-40 pointer-events-none hidden">
+        <div id="toastText" class="glass-panel px-5 py-2.5 rounded-full text-sm font-semibold text-amber-300 border border-amber-400/40 shadow-xl">
+            Уведомление
+        </div>
+    </div>
+
+    <!-- ВЕРХНЯЯ ПАНЕЛЬ HUD -->
+    <div id="hudTop" class="fixed top-3 left-3 right-3 z-20 flex flex-wrap items-center justify-between gap-2 pointer-events-none hidden">
+        <!-- Профиль лошади и статы -->
+        <div class="glass-panel rounded-2xl px-3.5 py-2 flex items-center gap-3 pointer-events-auto">
+            <div class="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-400/40 flex items-center justify-center text-xl">
+                🐴
+            </div>
+            <div>
+                <div class="flex items-center gap-2">
+                    <span id="horseNameDisplay" class="font-bold text-sm sm:text-base text-white">Арчибальд</span>
+                    <span id="breedBadge" class="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">Ганноверская</span>
+                </div>
+                <!-- Полоски чистоты, энергии и доверия -->
+                <div class="flex items-center gap-3 mt-1 text-[11px]">
+                    <div class="flex items-center gap-1" title="Чистота шерсти">
+                        <span>✨</span>
+                        <div class="w-14 sm:w-20 h-2 bg-slate-800 rounded-full overflow-hidden">
+                            <div id="cleanBar" class="h-full bg-sky-400 transition-all duration-300" style="width: 45%"></div>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-1" title="Энергия">
+                        <span>⚡</span>
+                        <div class="w-14 sm:w-20 h-2 bg-slate-800 rounded-full overflow-hidden">
+                            <div id="energyBar" class="h-full bg-emerald-400 transition-all duration-300" style="width: 85%"></div>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-1 text-amber-300 font-bold" title="Монеты клуба">
+                        <span>🪙</span>
+                        <span id="coinsDisplay">250</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Переключатель режимов / локаций -->
+        <div class="glass-panel rounded-2xl p-1.5 flex items-center gap-1.5 pointer-events-auto">
+            <button id="modeStablesBtn" class="glass-btn active px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-1.5">
+                <span>🧼</span> <span class="hidden sm:inline">Развязки</span>
+            </button>
+            <button id="modeArenaBtn" class="glass-btn px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-1.5">
+                <span>🏇</span> <span class="hidden sm:inline">Манеж и Конкур</span>
+            </button>
+            <button id="openCustomBtn" class="glass-btn px-3 py-2 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-1.5">
+                <span>🎨</span> <span class="hidden sm:inline">Кастомизация</span>
+            </button>
+            <button id="soundToggleBtn" class="glass-btn p-2 rounded-xl text-sm" title="Звук">
+                🔊
+            </button>
+        </div>
+    </div>
+
+    <!-- ИНДИКАТОР ТЕМПА ПРЫЖКА (появляется при приближении к барьеру в Манеже) -->
+    <div id="strideMeterBox" class="fixed top-24 left-1/2 -translate-x-1/2 z-20 w-72 sm:w-96 glass-panel rounded-2xl p-3 hidden pointer-events-none">
+        <div class="flex justify-between text-xs font-bold mb-1.5">
+            <span class="text-slate-300">Расчёт темпа (Stride)</span>
+            <span id="strideHint" class="text-amber-400">Попадите в зелёную зону!</span>
+        </div>
+        <div class="relative w-full h-4 bg-slate-900 rounded-full overflow-hidden border border-white/10">
+            <!-- Идеальная зона отталкивания -->
+            <div class="absolute top-0 bottom-0 left-[62%] w-[22%] bg-emerald-500/80 border-x border-emerald-300"></div>
+            <!-- Ползунок дистанции -->
+            <div id="strideNeedle" class="stride-marker absolute top-0 bottom-0 w-2 bg-white shadow-[0_0_8px_#fff] rounded-full" style="left: 0%"></div>
+        </div>
+    </div>
+
+    <!-- СЧЁТЧИК МАРШРУТА КОНКУРА -->
+    <div id="courseHud" class="fixed top-20 right-3 z-20 glass-panel rounded-2xl px-4 py-2.5 text-right hidden pointer-events-none">
+        <div class="text-[11px] uppercase tracking-wider text-slate-400 font-bold">Маршрут Конкура</div>
+        <div class="text-lg font-extrabold text-white">
+            Барьеры: <span id="jumpsClearedDisplay" class="text-emerald-400">0</span> / <span id="jumpsTotalDisplay">6</span>
+        </div>
+        <div class="text-xs text-slate-300">
+            Штрафные: <span id="faultsDisplay" class="text-rose-400 font-bold">0</span> • Время: <span id="timerDisplay" class="text-amber-300 font-mono">0.0с</span>
+        </div>
+    </div>
+
+    <!-- ПАНЕЛЬ РАЗВЯЗОК (Уход и седловка) -->
+    <div id="stablesPanel" class="fixed bottom-4 left-1/2 -translate-x-1/2 z-20 w-[95%] max-w-2xl glass-panel rounded-3xl p-3 sm:p-4 hidden">
+        <div class="flex items-center justify-between mb-2 px-1">
+            <span class="text-xs font-bold uppercase tracking-wider text-amber-400">Развязки • Подготовка лошади</span>
+            <span id="careStatusText" class="text-xs text-slate-300">Выберите щётку или амуницию</span>
+        </div>
+        <div class="grid grid-cols-5 gap-2">
+            <button id="toolBrushBtn" class="glass-btn p-2.5 sm:p-3 rounded-2xl flex flex-col items-center justify-center gap-1 text-center">
+                <span class="text-xl sm:text-2xl">🪮</span>
+                <span class="text-[11px] font-semibold leading-tight">Щётка</span>
+            </button>
+            <button id="toolHoofBtn" class="glass-btn p-2.5 sm:p-3 rounded-2xl flex flex-col items-center justify-center gap-1 text-center">
+                <span class="text-xl sm:text-2xl">🧲</span>
+                <span class="text-[11px] font-semibold leading-tight">Крючок</span>
+            </button>
+            <button id="toolTreatBtn" class="glass-btn p-2.5 sm:p-3 rounded-2xl flex flex-col items-center justify-center gap-1 text-center">
+                <span class="text-xl sm:text-2xl">🥕</span>
+                <span class="text-[11px] font-semibold leading-tight">Морковь</span>
+            </button>
+            <button id="toolSaddleBtn" class="glass-btn p-2.5 sm:p-3 rounded-2xl flex flex-col items-center justify-center gap-1 text-center">
+                <span class="text-xl sm:text-2xl">🪑</span>
+                <span id="saddleLabel" class="text-[11px] font-semibold leading-tight">Седло: Нет</span>
+            </button>
+            <button id="toolBridleBtn" class="glass-btn p-2.5 sm:p-3 rounded-2xl flex flex-col items-center justify-center gap-1 text-center">
+                <span class="text-xl sm:text-2xl">🪢</span>
+                <span id="bridleLabel" class="text-[11px] font-semibold leading-tight">Уздечка: Нет</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- ПАНЕЛЬ ВЕРХОВОЙ ЕЗДЫ (Манеж) -->
+    <div id="arenaPanel" class="fixed bottom-4 left-3 right-3 z-20 flex items-end justify-between pointer-events-none hidden">
+        <!-- Левая часть: Управление аллюром и поворотами (для мобильных и ПК) -->
+        <div class="glass-panel rounded-3xl p-3 pointer-events-auto flex flex-col gap-2">
+            <div class="flex items-center justify-between gap-3 px-1">
+                <span class="text-[11px] font-bold uppercase text-slate-400">Аллюр:</span>
+                <span id="gaitNameDisplay" class="text-xs font-extrabold text-amber-400 uppercase">Остановка</span>
+            </div>
+            <div class="flex items-center gap-1.5">
+                <button id="gaitDownBtn" class="glass-btn w-11 h-11 rounded-2xl font-bold text-lg flex items-center justify-center" title="Замедлить (S / ↓)">
+                    🐢
+                </button>
+                <button id="gaitUpBtn" class="glass-btn w-11 h-11 rounded-2xl font-bold text-lg flex items-center justify-center" title="Ускорить аллюр (W / ↑)">
+                    🐎
+                </button>
+                <div class="w-px h-8 bg-white/10 mx-1"></div>
+                <button id="turnLeftBtn" class="glass-btn w-11 h-11 rounded-2xl font-bold text-lg flex items-center justify-center" title="Поворот влево (A / ←)">
+                    ⬅️
+                </button>
+                <button id="turnRightBtn" class="glass-btn w-11 h-11 rounded-2xl font-bold text-lg flex items-center justify-center" title="Поворот вправо (D / →)">
+                    ➡️
+                </button>
+            </div>
+        </div>
+
+        <!-- Центр (на десктопе подсказка) -->
+        <div class="hidden md:flex glass-panel rounded-2xl px-4 py-2 text-xs text-slate-300 items-center gap-3">
+            <span><kbd class="px-1.5 py-0.5 bg-slate-800 rounded border border-white/15">W/S</kbd> Аллюр</span>
+            <span><kbd class="px-1.5 py-0.5 bg-slate-800 rounded border border-white/15">A/D</kbd> Поворот</span>
+            <span><kbd class="px-1.5 py-0.5 bg-slate-800 rounded border border-white/15">Пробел</kbd> Прыжок</span>
+            <span><kbd class="px-1.5 py-0.5 bg-slate-800 rounded border border-white/15">Мышь</kbd> Обзор</span>
+        </div>
+
+        <!-- Правая часть: Прыжок и старт маршрута -->
+        <div class="flex flex-col items-end gap-2 pointer-events-auto">
+            <button id="startCourseBtn" class="glass-btn px-4 py-2 rounded-2xl text-xs font-bold text-emerald-300 border-emerald-400/40 flex items-center gap-1.5">
+                <span>🏁</span> <span id="courseBtnText">Начать конкур</span>
+            </button>
+            <button id="jumpBtn" class="w-20 h-20 sm:w-24 sm:h-24 rounded-3xl bg-gradient-to-br from-amber-400 to-orange-600 text-slate-950 font-extrabold text-sm sm:text-base shadow-xl shadow-orange-500/30 border-2 border-amber-200 active:scale-90 transition flex flex-col items-center justify-center">
+                <span class="text-2xl">⏫</span>
+                <span>ПРЫЖОК</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- МОДАЛЬНОЕ ОКНО КАСТОМИЗАЦИИ ЛОШАДИ -->
+    <div id="customModal" class="fixed inset-0 z-40 bg-slate-950/75 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+        <div class="glass-panel max-w-md w-full rounded-3xl p-6 border border-white/15">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-xl font-extrabold text-white flex items-center gap-2">
+                    <span>🎨</span> Настройка Лошади
+                </h2>
+                <button id="closeCustomBtn" class="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-sm font-bold">
+                    ✕
+                </button>
+            </div>
+
+            <div class="space-y-4">
+                <!-- Кличка -->
+                <div>
+                    <label class="block text-xs font-bold uppercase text-slate-400 mb-1">Кличка лошади</label>
+                    <input id="horseNameInput" type="text" maxlength="18" value="Арчибальд" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900/90 border border-white/15 text-white text-sm focus:outline-none focus:border-amber-400">
+                </div>
+
+                <!-- Масть (цвет шерсти) -->
+                <div>
+                    <label class="block text-xs font-bold uppercase text-slate-400 mb-1.5">Масть</label>
+                    <div id="coatColors" class="grid grid-cols-5 gap-2">
+                        <button data-coat="#6b3e26" class="coat-swatch h-10 rounded-xl border-2 border-amber-400 shadow-inner" style="background:#6b3e26" title="Гнедая"></button>
+                        <button data-coat="#1f1f24" class="coat-swatch h-10 rounded-xl border border-white/20" style="background:#1f1f24" title="Вороная"></button>
+                        <button data-coat="#e2e8f0" class="coat-swatch h-10 rounded-xl border border-white/20" style="background:#e2e8f0" title="Серая (Белая)"></button>
+                        <button data-coat="#c27d38" class="coat-swatch h-10 rounded-xl border border-white/20" style="background:#c27d38" title="Соловая"></button>
+                        <button data-coat="#8c3b2b" class="coat-swatch h-10 rounded-xl border border-white/20" style="background:#8c3b2b" title="Рыжая"></button>
+                    </div>
+                </div>
+
+                <!-- Цвет гривы и хвоста -->
+                <div>
+                    <label class="block text-xs font-bold uppercase text-slate-400 mb-1.5">Грива и хвост</label>
+                    <div id="maneColors" class="grid grid-cols-4 gap-2">
+                        <button data-mane="#141417" class="mane-swatch h-9 rounded-xl border-2 border-amber-400" style="background:#141417" title="Чёрная"></button>
+                        <button data-mane="#f8fafc" class="mane-swatch h-9 rounded-xl border border-white/20" style="background:#f8fafc" title="Белая"></button>
+                        <button data-mane="#5c3317" class="mane-swatch h-9 rounded-xl border border-white/20" style="background:#5c3317" title="Каштановая"></button>
+                        <button data-mane="#d4a359" class="mane-swatch h-9 rounded-xl border border-white/20" style="background:#d4a359" title="Пшеничная"></button>
+                    </div>
+                </div>
+
+                <!-- Цвет вальтрапа (коврика под седло) -->
+                <div>
+                    <label class="block text-xs font-bold uppercase text-slate-400 mb-1.5">Цвет вальтрапа</label>
+                    <div id="padColors" class="grid grid-cols-5 gap-2">
+                        <button data-pad="#0284c7" class="pad-swatch h-9 rounded-xl border-2 border-amber-400" style="background:#0284c7" title="Сапфир"></button>
+                        <button data-pad="#e11d48" class="pad-swatch h-9 rounded-xl border border-white/20" style="background:#e11d48" title="Рубин"></button>
+                        <button data-pad="#059669" class="pad-swatch h-9 rounded-xl border border-white/20" style="background:#059669" title="Изумруд"></button>
+                        <button data-pad="#7c3aed" class="pad-swatch h-9 rounded-xl border border-white/20" style="background:#7c3aed" title="Аметист"></button>
+                        <button data-pad="#f8fafc" class="pad-swatch h-9 rounded-xl border border-white/20" style="background:#f8fafc" title="Парадный белый"></button>
+                    </div>
+                </div>
+            </div>
+
+            <button id="saveCustomBtn" class="mt-6 w-full py-3 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 font-extrabold text-sm shadow-lg hover:brightness-110 transition">
+                Применить образ
+            </button>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * LCS: EQuest 3D — Полноценный 3D симулятор конного клуба
+         * Реализованы:
+         * 1. Локация "Развязки" (чистка щёткой от грязи, раскрючковка копыт, кормление, надевание вальтрапа, седла и уздечки).
+         * 2. Локация "Открытый Манеж" с процедурной 3D-лошадью, анимацией 4 аллюров (Остановка, Шаг, Рысь, Галоп, Карьер).
+         * 3. Механика конкура с расчётом темпа прыжка (Stride Meter) и подсчётом штрафных очков.
+         * 4. Процедурный синтез звуков копыт, ржания и фанфар через Tone.js.
+         */
+
+        // ==========================================
+        // 1. СОСТОЯНИЕ ИГРЫ И НАСТРОЙКИ
+        // ==========================================
+        const state = {
+            started: false,
+            mode: 'stables', // 'stables' | 'arena'
+            soundEnabled: true,
+            coins: 250,
+            horse: {
+                name: 'Арчибальд',
+                coatColor: '#6b3e26',
+                maneColor: '#141417',
+                padColor: '#0284c7',
+                cleanliness: 45, // 0 - 100
+                energy: 85,      // 0 - 100
+                hasSaddle: false,
+                hasBridle: false
+            },
+            // Физика и движение в манеже
+            gait: 0, // 0: Остановка, 1: Шаг, 2: Рысь, 3: Галоп, 4: Карьер
+            gaitNames: ['Остановка', 'Шаг', 'Рысь', 'Галоп', 'Карьер'],
+            gaitSpeeds: [0, 4.5, 9.5, 16.0, 22.5],
+            pos: new THREE.Vector3(0, 0, 28),
+            heading: Math.PI, // Смотрит вглубь манежа (-Z)
+            speed: 0,
+            turnInput: 0,
+            // Прыжок
+            isJumping: false,
+            jumpVelY: 0,
+            jumpY: 0,
+            jumpQuality: 'normal', // 'perfect' | 'good' | 'late' | 'early'
+            // Маршрут конкура
+            courseActive: false,
+            courseTime: 0,
+            jumpsCleared: 0,
+            faults: 0,
+            nextJumpIndex: 0
+        };
+
+        // ==========================================
+        // 2. АУДИО ДВИЖОК (Tone.js)
+        // ==========================================
+        let hoofSynth, chimeSynth, errorSynth;
+        let lastStepPhase = 0;
+
+        function initAudio() {
+            try {
+                hoofSynth = new Tone.MembraneSynth({
+                    pitchDecay: 0.03,
+                    octaves: 2,
+                    oscillator: { type: 'sine' },
+                    envelope: { attack: 0.002, decay: 0.09, sustain: 0, release: 0.05 }
+                }).toDestination();
+                hoofSynth.volume.value = -14;
+
+                chimeSynth = new Tone.PolySynth(Tone.Synth, {
+                    oscillator: { type: 'triangle' },
+                    envelope: { attack: 0.01, decay: 0.25, sustain: 0.1, release: 0.4 }
+                }).toDestination();
+                chimeSynth.volume.value = -10;
+
+                errorSynth = new Tone.Synth({
+                    oscillator: { type: 'sawtooth' },
+                    envelope: { attack: 0.01, decay: 0.2, sustain: 0, release: 0.2 }
+                }).toDestination();
+                errorSynth.volume.value = -14;
+            } catch (e) {
+                console.warn('Аудио инициализировано без звука:', e);
+            }
+        }
+
+        function playHoofSound(pitch = 'C2') {
+            if (!state.soundEnabled || !hoofSynth || Tone.context.state !== 'running') return;
+            try {
+                hoofSynth.triggerAttackRelease(pitch, '32n');
+            } catch (e) {}
+        }
+
+        function playChime(notes = ['C5', 'E5', 'G5']) {
+            if (!state.soundEnabled || !chimeSynth || Tone.context.state !== 'running') return;
+            try {
+                chimeSynth.triggerAttackRelease(notes, '8n');
+            } catch (e) {}
+        }
+
+        function playFaultSound() {
+            if (!state.soundEnabled || !errorSynth || Tone.context.state !== 'running') return;
+            try {
+                errorSynth.triggerAttackRelease('F2', '8n');
+            } catch (e) {}
+        }
+
+        // ==========================================
+        // 3. THREE.JS СЦЕНА, СВЕТ И ОКРУЖЕНИЕ
+        // ==========================================
+        const canvas = document.getElementById('gameCanvas');
+        const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.1;
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color('#7dd3fc');
+        scene.fog = new THREE.FogExp2('#bae6fd', 0.0085);
+
+        const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 300);
+
+        // Освещение (Солнечный день на ранчо)
+        const hemiLight = new THREE.HemisphereLight('#ffffff', '#4d7c0f', 0.75);
+        hemiLight.position.set(0, 50, 0);
+        scene.add(hemiLight);
+
+        const sunLight = new THREE.DirectionalLight('#fffbeb', 1.35);
+        sunLight.position.set(35, 55, 25);
+        sunLight.castShadow = true;
+        sunLight.shadow.mapSize.width = 2048;
+        sunLight.shadow.mapSize.height = 2048;
+        sunLight.shadow.camera.near = 5;
+        sunLight.shadow.camera.far = 160;
+        const d = 55;
+        sunLight.shadow.camera.left = -d;
+        sunLight.shadow.camera.right = d;
+        sunLight.shadow.camera.top = d;
+        sunLight.shadow.camera.bottom = -d;
+        sunLight.shadow.bias = -0.0005;
+        scene.add(sunLight);
+
+        // Группы локаций
+        const stablesGroup = new THREE.Group();
+        const arenaGroup = new THREE.Group();
+        scene.add(stablesGroup);
+        scene.add(arenaGroup);
+
+        // ==========================================
+        // 4. ПОСТРОЕНИЕ 3D-ЛОШАДИ И АМУНИЦИИ
+        // ==========================================
+        const horseRoot = new THREE.Group();
+        scene.add(horseRoot);
+
+        // Материалы лошади (обновляются при кастомизации)
+        const coatMat = new THREE.MeshStandardMaterial({ color: state.horse.coatColor, roughness: 0.65, metalness: 0.05 });
+        const maneMat = new THREE.MeshStandardMaterial({ color: state.horse.maneColor, roughness: 0.85 });
+        const hoofMat = new THREE.MeshStandardMaterial({ color: '#1e293b', roughness: 0.4 });
+        const dirtMat = new THREE.MeshStandardMaterial({ color: '#5c4033', roughness: 0.95, transparent: true, opacity: 0.65 });
+        const leatherMat = new THREE.MeshStandardMaterial({ color: '#3b1e0e', roughness: 0.35, metalness: 0.1 });
+        const metalMat = new THREE.MeshStandardMaterial({ color: '#e2e8f0', roughness: 0.2, metalness: 0.85 });
+        const padMat = new THREE.MeshStandardMaterial({ color: state.horse.padColor, roughness: 0.8 });
+
+        // Сборка анатомически выразительной стилизованной 3D-лошади
+        const horseBodyGroup = new THREE.Group();
+        horseBodyGroup.position.y = 1.38;
+        horseRoot.add(horseBodyGroup);
+
+        // Туловище (грудь, спина, круп)
+        const torsoGeo = new THREE.CylinderGeometry(0.44, 0.46, 1.55, 20);
+        torsoGeo.rotateX(Math.PI / 2);
+        const torsoMesh = new THREE.Mesh(torsoGeo, coatMat);
+        torsoMesh.castShadow = true;
+        torsoMesh.receiveShadow = true;
+        horseBodyGroup.add(torsoMesh);
+
+        const chestMesh = new THREE.Mesh(new THREE.SphereGeometry(0.45, 20, 16), coatMat);
+        chestMesh.position.set(0, 0.02, 0.72);
+        chestMesh.castShadow = true;
+        horseBodyGroup.add(chestMesh);
+
+        const croupMesh = new THREE.Mesh(new THREE.SphereGeometry(0.46, 20, 16), coatMat);
+        croupMesh.position.set(0, 0.04, -0.72);
+        croupMesh.castShadow = true;
+        horseBodyGroup.add(croupMesh);
+
+        // Пятна грязи (исчезают при чистке щёткой)
+        const dirtPatches = [];
+        const dirtPositions = [
+            [0.42, -0.05, 0.2], [-0.42, -0.02, -0.15],
+            [0.40, 0.08, -0.45], [-0.41, -0.08, 0.45],
+            [0.35, -0.2, 0.65], [-0.36, -0.18, -0.6]
+        ];
+        dirtPositions.forEach(p => {
+            const patch = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 10), dirtMat);
+            patch.scale.set(0.3, 1.1, 1.3);
+            patch.position.set(p[0], p[1], p[2]);
+            horseBodyGroup.add(patch);
+            dirtPatches.push(patch);
+        });
+
+        // Шея и Голова
+        const neckPivot = new THREE.Group();
+        neckPivot.position.set(0, 0.22, 0.78);
+        horseBodyGroup.add(neckPivot);
+
+        const neckGeo = new THREE.CylinderGeometry(0.20, 0.34, 0.95, 16);
+        neckGeo.translate(0, 0.42, 0);
+        const neckMesh = new THREE.Mesh(neckGeo, coatMat);
+        neckMesh.rotation.x = Math.PI / 5.2;
+        neckMesh.castShadow = true;
+        neckPivot.add(neckMesh);
+
+        // Грива вдоль шеи
+        const maneGroup = new THREE.Group();
+        for (let i = 0; i < 7; i++) {
+            const tuft = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.22, 0.16), maneMat);
+            tuft.position.set(0.06, 0.16 + i * 0.11, -0.08 + i * 0.065);
+            tuft.rotation.z = -0.25;
+            maneGroup.add(tuft);
+        }
+        neckPivot.add(maneGroup);
+
+        // Голова
+        const headPivot = new THREE.Group();
+        headPivot.position.set(0, 0.82, 0.52);
+        neckPivot.add(headPivot);
+
+        const skullMesh = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.30, 0.36), coatMat);
+        skullMesh.castShadow = true;
+        headPivot.add(skullMesh);
+
+        const muzzleMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.10, 0.14, 0.36, 14), coatMat);
+        muzzleMesh.rotation.x = Math.PI / 2.3;
+        muzzleMesh.position.set(0, -0.10, 0.26);
+        muzzleMesh.castShadow = true;
+        headPivot.add(muzzleMesh);
+
+        // Глаза и уши
+        [-1, 1].forEach(side => {
+            const eye = new THREE.Mesh(new THREE.SphereGeometry(0.032, 10, 10), hoofMat);
+            eye.position.set(side * 0.14, 0.04, 0.08);
+            headPivot.add(eye);
+
+            const ear = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.18, 8), coatMat);
+            ear.position.set(side * 0.09, 0.22, -0.06);
+            ear.rotation.x = 0.2;
+            ear.rotation.z = -side * 0.15;
+            headPivot.add(ear);
+        });
+
+        // Хвост
+        const tailPivot = new THREE.Group();
+        tailPivot.position.set(0, 0.22, -1.12);
+        horseBodyGroup.add(tailPivot);
+
+        const tailMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.15, 1.05, 12), maneMat);
+        tailMesh.position.set(0, -0.48, -0.12);
+        tailMesh.rotation.x = -0.22;
+        tailMesh.castShadow = true;
+        tailPivot.add(tailMesh);
+
+        // Ноги (4 шарнирные конечности: бедро/плечо + голень/пясть + копыто)
+        const legs = [];
+        const legConfigs = [
+            { name: 'FL', x: 0.23, z: 0.72 },  // Передняя левая
+            { name: 'FR', x: -0.23, z: 0.72 }, // Передняя правая
+            { name: 'BL', x: 0.24, z: -0.74 }, // Задняя левая
+            { name: 'BR', x: -0.24, z: -0.74 } // Задняя правая
+        ];
+
+        legConfigs.forEach(cfg => {
+            const hipPivot = new THREE.Group();
+            hipPivot.position.set(cfg.x, -0.12, cfg.z);
+            horseBodyGroup.add(hipPivot);
+
+            const upperLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.08, 0.65, 12), coatMat);
+            upperLeg.position.y = -0.30;
+            upperLeg.castShadow = true;
+            hipPivot.add(upperLeg);
+
+            const kneePivot = new THREE.Group();
+            kneePivot.position.set(0, -0.62, 0);
+            hipPivot.add(kneePivot);
+
+            const lowerLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.06, 0.58, 12), coatMat);
+            lowerLeg.position.y = -0.28;
+            lowerLeg.castShadow = true;
+            kneePivot.add(lowerLeg);
+
+            const hoof = new THREE.Mesh(new THREE.CylinderGeometry(0.068, 0.085, 0.11, 12), hoofMat);
+            hoof.position.y = -0.58;
+            hoof.castShadow = true;
+            kneePivot.add(hoof);
+
+            legs.push({ hip: hipPivot, knee: kneePivot, isFront: cfg.z > 0, isLeft: cfg.x > 0 });
+        });
+
+        // АМУНИЦИЯ: Вальтрап, Седло, Стремена, Уздечка и Поводья
+        const saddleGroup = new THREE.Group();
+        saddleGroup.visible = false;
+        horseBodyGroup.add(saddleGroup);
+
+        // Вальтрап
+        const padMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.47, 0.47, 0.68, 20, 1, false, -Math.PI * 0.65, Math.PI * 1.3), padMat);
+        padMesh.rotation.z = Math.PI / 2;
+        padMesh.rotation.y = Math.PI / 2;
+        padMesh.position.set(0, 0.05, 0.05);
+        saddleGroup.add(padMesh);
+
+        // Седло
+        const saddleSeat = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.14, 0.56), leatherMat);
+        saddleSeat.position.set(0, 0.48, 0.04);
+        saddleSeat.castShadow = true;
+        saddleGroup.add(saddleSeat);
+
+        const pommel = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.16, 0.14), leatherMat);
+        pommel.position.set(0, 0.54, 0.26);
+        saddleGroup.add(pommel);
+
+        const cantle = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.18, 0.14), leatherMat);
+        cantle.position.set(0, 0.55, -0.20);
+        saddleGroup.add(cantle);
+
+        // Подпруга и стремена
+        const girth = new THREE.Mesh(new THREE.CylinderGeometry(0.465, 0.465, 0.10, 20), leatherMat);
+        girth.rotation.x = Math.PI / 2;
+        girth.position.set(0, -0.01, 0.16);
+        saddleGroup.add(girth);
+
+        [-1, 1].forEach(side => {
+            const strap = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.55, 0.04), leatherMat);
+            strap.position.set(side * 0.47, 0.15, 0.12);
+            saddleGroup.add(strap);
+
+            const stirrup = new THREE.Mesh(new THREE.TorusGeometry(0.06, 0.012, 8, 16), metalMat);
+            stirrup.position.set(side * 0.48, -0.14, 0.12);
+            stirrup.rotation.y = Math.PI / 2;
+            saddleGroup.add(stirrup);
+        });
+
+        // Уздечка (на голове)
+        const bridleGroup = new THREE.Group();
+        bridleGroup.visible = false;
+        headPivot.add(bridleGroup);
+
+        const noseband = new THREE.Mesh(new THREE.CylinderGeometry(0.135, 0.145, 0.05, 16), leatherMat);
+        noseband.rotation.x = Math.PI / 2.3;
+        noseband.position.set(0, -0.08, 0.23);
+        bridleGroup.add(noseband);
+
+        const browband = new THREE.Mesh(new THREE.BoxGeometry(0.31, 0.04, 0.04), leatherMat);
+        browband.position.set(0, 0.11, 0.16);
+        bridleGroup.add(browband);
+
+        [-1, 1].forEach(side => {
+            const cheekStrap = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.04, 0.34), leatherMat);
+            cheekStrap.position.set(side * 0.15, 0.02, 0.08);
+            cheekStrap.rotation.x = 0.35;
+            bridleGroup.add(cheekStrap);
+
+            const bitRing = new THREE.Mesh(new THREE.TorusGeometry(0.035, 0.008, 8, 16), metalMat);
+            bitRing.position.set(side * 0.13, -0.14, 0.32);
+            bitRing.rotation.y = Math.PI / 2;
+            bridleGroup.add(bitRing);
+        });
+
+        // ==========================================
+        // 5. ОКРУЖЕНИЕ: РАЗВЯЗКИ И КОНКУРНЫЙ МАНЕЖ
+        // ==========================================
+        function buildStables() {
+            // Пол конюшни (резиновая плитка)
+            const floor = new THREE.Mesh(
+                new THREE.PlaneGeometry(16, 20),
+                new THREE.MeshStandardMaterial({ color: '#475569', roughness: 0.85 })
+            );
+            floor.rotation.x = -Math.PI / 2;
+            floor.receiveShadow = true;
+            stablesGroup.add(floor);
+
+            // Деревянные стены денников и балки
+            const woodMat = new THREE.MeshStandardMaterial({ color: '#78350f', roughness: 0.75 });
+            const wallL = new THREE.Mesh(new THREE.BoxGeometry(0.4, 4.2, 20), woodMat);
+            wallL.position.set(-4.5, 2.1, 0);
+            wallL.receiveShadow = true;
+            stablesGroup.add(wallL);
+
+            const wallR = new THREE.Mesh(new THREE.BoxGeometry(0.4, 4.2, 20), woodMat);
+            wallR.position.set(4.5, 2.1, 0);
+            wallR.receiveShadow = true;
+            stablesGroup.add(wallR);
+
+            // Столбы развязок (Crossties)
+            [-1.8, 1.8].forEach(xPos => {
+                const post = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 3.2, 12), woodMat);
+                post.position.set(xPos, 1.6, 1.35);
+                post.castShadow = true;
+                stablesGroup.add(post);
+
+                // Чомбур (цепь/веревка развязки к недоуздку)
+                const ropeGeo = new THREE.CylinderGeometry(0.015, 0.015, 1.5, 8);
+                ropeGeo.rotateZ(Math.PI / 2);
+                const rope = new THREE.Mesh(ropeGeo, new THREE.MeshStandardMaterial({ color: '#f59e0b', roughness: 0.5 }));
+                rope.position.set(xPos * 0.55, 2.25, 1.35);
+                rope.rotation.z = xPos > 0 ? 0.15 : -0.15;
+                stablesGroup.add(rope);
+            });
+
+            // Ящик со щётками и тюк сена для атмосферы
+            const hay = new THREE.Mesh(
+                new THREE.BoxGeometry(1.1, 0.65, 0.75),
+                new THREE.MeshStandardMaterial({ color: '#eab308', roughness: 0.95 })
+            );
+            hay.position.set(-3.2, 0.325, 2.5);
+            hay.castShadow = true;
+            stablesGroup.add(hay);
+
+            const tackBox = new THREE.Mesh(
+                new THREE.BoxGeometry(0.8, 0.55, 0.55),
+                new THREE.MeshStandardMaterial({ color: '#0284c7', roughness: 0.5 })
+            );
+            tackBox.position.set(3.2, 0.275, 2.2);
+            tackBox.castShadow = true;
+            stablesGroup.add(tackBox);
+        }
+
+        // Барьеры для конкура
+        const jumpObstacles = [];
+
+        function createJumpObstacle(x, z, rotY, height = 1.05, color1 = '#ef4444', color2 = '#ffffff') {
+            const group = new THREE.Group();
+            group.position.set(x, 0, z);
+            group.rotation.y = rotY;
+
+            const standMat = new THREE.MeshStandardMaterial({ color: '#f8fafc', roughness: 0.5 });
+            const matA = new THREE.MeshStandardMaterial({ color: color1, roughness: 0.4 });
+            const matB = new THREE.MeshStandardMaterial({ color: color2, roughness: 0.4 });
+
+            // Две боковые стойки с флажками (красный справа, белый слева)
+            [-2.2, 2.2].forEach((sx, idx) => {
+                const post = new THREE.Mesh(new THREE.BoxGeometry(0.16, 1.75, 0.16), standMat);
+                post.position.set(sx, 0.875, 0);
+                post.castShadow = true;
+                group.add(post);
+
+                const base = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.12, 0.7), standMat);
+                base.position.set(sx, 0.06, 0);
+                group.add(base);
+
+                // Флажок
+                const flag = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.24, 0.16, 0.03),
+                    idx === 1 ? matA : matB
+                );
+                flag.position.set(sx + (idx === 1 ? 0.16 : -0.16), 1.65, 0);
+                group.add(flag);
+            });
+
+            // Полосатые жерди (2 уровня)
+            const bars = [];
+            [height * 0.55, height].forEach(barY => {
+                const barGroup = new THREE.Group();
+                barGroup.position.set(0, barY, 0);
+                const segCount = 6;
+                const segWidth = 4.3 / segCount;
+                for (let i = 0; i < segCount; i++) {
+                    const seg = new THREE.Mesh(
+                        new THREE.CylinderGeometry(0.065, 0.065, segWidth, 12),
+                        i % 2 === 0 ? matA : matB
+                    );
+                    seg.rotation.z = Math.PI / 2;
+                    seg.position.x = -2.15 + segWidth * (i + 0.5);
+                    seg.castShadow = true;
+                    barGroup.add(seg);
+                }
+                group.add(barGroup);
+                bars.push(barGroup);
+            });
+
+            // Номер барьера
+            arenaGroup.add(group);
+            jumpObstacles.push({
+                group,
+                bars,
+                pos: new THREE.Vector3(x, 0, z),
+                rotY,
+                height,
+                cleared: false,
+                knocked: false
+            });
+        }
+
+        function buildArena() {
+            // Бесконечная зелёная лужайка вокруг клуба
+            const grass = new THREE.Mesh(
+                new THREE.PlaneGeometry(360, 360),
+                new THREE.MeshStandardMaterial({ color: '#4d7c0f', roughness: 0.95 })
+            );
+            grass.rotation.x = -Math.PI / 2;
+            grass.position.y = -0.02;
+            grass.receiveShadow = true;
+            arenaGroup.add(grass);
+
+            // Песчаный конкурный плац 64 x 96 метров
+            const sand = new THREE.Mesh(
+                new THREE.PlaneGeometry(64, 96),
+                new THREE.MeshStandardMaterial({ color: '#e7d3b0', roughness: 0.9 })
+            );
+            sand.rotation.x = -Math.PI / 2;
+            sand.receiveShadow = true;
+            arenaGroup.add(sand);
+
+            // Белое ограждение манежа с буквами выездки (A, K, E, H, C, M, B, F)
+            const fenceMat = new THREE.MeshStandardMaterial({ color: '#f8fafc', roughness: 0.45 });
+            for (let z = -48; z <= 48; z += 4) {
+                [-32, 32].forEach(x => {
+                    const post = new THREE.Mesh(new THREE.BoxGeometry(0.18, 1.1, 0.18), fenceMat);
+                    post.position.set(x, 0.55, z);
+                    post.castShadow = true;
+                    arenaGroup.add(post);
+                });
+            }
+            [-32, 32].forEach(x => {
+                const rail = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.12, 96), fenceMat);
+                rail.position.set(x, 0.95, 0);
+                arenaGroup.add(rail);
+            });
+            for (let x = -32; x <= 32; x += 4) {
+                [-48, 48].forEach(z => {
+                    const post = new THREE.Mesh(new THREE.BoxGeometry(0.18, 1.1, 0.18), fenceMat);
+                    post.position.set(x, 0.55, z);
+                    arenaGroup.add(post);
+                });
+            }
+            [-48, 48].forEach(z => {
+                const rail = new THREE.Mesh(new THREE.BoxGeometry(64, 0.12, 0.1), fenceMat);
+                rail.position.set(0, 0.95, z);
+                arenaGroup.add(rail);
+            });
+
+            // Декоративные деревья по периметру
+            const trunkMat = new THREE.MeshStandardMaterial({ color: '#5c3a21', roughness: 0.9 });
+            const leafMat = new THREE.MeshStandardMaterial({ color: '#15803d', roughness: 0.8 });
+            for (let i = 0; i < 28; i++) {
+                const angle = (i / 28) * Math.PI * 2;
+                const radius = 62 + (i % 3) * 12;
+                const tx = Math.cos(angle) * radius;
+                const tz = Math.sin(angle) * radius;
+                const tree = new THREE.Group();
+                tree.position.set(tx, 0, tz);
+                const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.6, 3.2, 8), trunkMat);
+                trunk.position.y = 1.6;
+                trunk.castShadow = true;
+                const crown = new THREE.Mesh(new THREE.ConeGeometry(2.8, 6.5, 9), leafMat);
+                crown.position.y = 5.5;
+                crown.castShadow = true;
+                tree.add(trunk, crown);
+                arenaGroup.add(tree);
+            }
+
+            // Маршрут из 6 барьеров по овальной траектории
+            createJumpObstacle(0, 12, 0, 0.95, '#ef4444', '#ffffff');
+            createJumpObstacle(0, -14, 0, 1.05, '#0284c7', '#ffffff');
+            createJumpObstacle(16, -24, Math.PI / 2, 1.10, '#10b981', '#ffffff');
+            createJumpObstacle(20, 0, 0, 1.15, '#f59e0b', '#1e293b');
+            createJumpObstacle(16, 24, Math.PI / 2, 1.10, '#8b5cf6', '#ffffff');
+            createJumpObstacle(-16, 0, 0, 1.20, '#e11d48', '#fbbf24');
+        }
+
+        buildStables();
+        buildArena();
+
+        // ==========================================
+        // 6. УПРАВЛЕНИЕ КАМЕРОЙ (МЫШЬ И СЕНСОР)
+        // ==========================================
+        let camYaw = 0.55;
+        let camPitch = 0.25;
+        let isDragging = false;
+        let prevPointer = { x: 0, y: 0 };
+
+        canvas.addEventListener('pointerdown', (e) => {
+            isDragging = true;
+            prevPointer = { x: e.clientX, y: e.clientY };
+        });
+
+        window.addEventListener('pointermove', (e) => {
+            if (!isDragging) return;
+            const dx = e.clientX - prevPointer.x;
+            const dy = e.clientY - prevPointer.y;
+            prevPointer = { x: e.clientX, y: e.clientY };
+
+            camYaw -= dx * 0.0065;
+            camPitch = Math.max(0.05, Math.min(1.1, camPitch + dy * 0.005));
+        });
+
+        window.addEventListener('pointerup', () => {
+            isDragging = false;
+        });
+
+        // ==========================================
+        // 7. ИГРОВЫЕ ДЕЙСТВИЯ И UI ЛОГИКА
+        // ==========================================
+        let toastTimeout;
+        function showToast(msg) {
+            const box = document.getElementById('toastBox');
+            const txt = document.getElementById('toastText');
+            txt.textContent = msg;
+            box.classList.remove('hidden');
+            box.classList.remove('toast-anim');
+            void box.offsetWidth;
+            box.classList.add('toast-anim');
+
+            clearTimeout(toastTimeout);
+            toastTimeout = setTimeout(() => {
+                box.classList.add('hidden');
+            }, 2600);
+        }
+
+        function updateHUD() {
+            document.getElementById('horseNameDisplay').textContent = state.horse.name;
+            document.getElementById('cleanBar').style.width = `${state.horse.cleanliness}%`;
+            document.getElementById('energyBar').style.width = `${state.horse.energy}%`;
+            document.getElementById('coinsDisplay').textContent = state.coins;
+
+            document.getElementById('saddleLabel').textContent = state.horse.hasSaddle ? 'Седло: Надето' : 'Седло: Нет';
+            document.getElementById('bridleLabel').textContent = state.horse.hasBridle ? 'Уздечка: Надета' : 'Уздечка: Нет';
+
+            document.getElementById('toolSaddleBtn').classList.toggle('active', state.horse.hasSaddle);
+            document.getElementById('toolBridleBtn').classList.toggle('active', state.horse.hasBridle);
+
+            document.getElementById('gaitNameDisplay').textContent = state.gaitNames[state.gait];
+
+            // Обновление видимости пятен грязи на лошади
+            const dirtThreshold = (100 - state.horse.cleanliness) / 100;
+            dirtPatches.forEach((patch, idx) => {
+                patch.visible = (idx / dirtPatches.length) < dirtThreshold;
+            });
+        }
+
+        function switchMode(newMode) {
+            state.mode = newMode;
+            const isStables = newMode === 'stables';
+
+            stablesGroup.visible = isStables;
+            arenaGroup.visible = !isStables;
+
+            document.getElementById('modeStablesBtn').classList.toggle('active', isStables);
+            document.getElementById('modeArenaBtn').classList.toggle('active', !isStables);
+
+            document.getElementById('stablesPanel').classList.toggle('hidden', !isStables);
+            document.getElementById('arenaPanel').classList.toggle('hidden', isStables);
+            document.getElementById('courseHud').classList.toggle('hidden', isStables || !state.courseActive);
+            document.getElementById('strideMeterBox').classList.add('hidden');
+
+            if (isStables) {
+                state.gait = 0;
+                state.speed = 0;
+                state.isJumping = false;
+                state.jumpY = 0;
+                horseRoot.position.set(0, 0, 0);
+                horseRoot.rotation.set(0, 0, 0);
+                camYaw = 0.65;
+                camPitch = 0.22;
+                showToast('Лошадь на развязках. Почистите и поседлайте её!');
+            } else {
+                horseRoot.position.copy(state.pos);
+                horseRoot.rotation.y = state.heading;
+                camYaw = 0;
+                camPitch = 0.28;
+                if (!state.horse.hasSaddle || !state.horse.hasBridle) {
+                    showToast('Совет: без седла и уздечки управление сложнее!');
+                } else {
+                    showToast('Вы выехали на конкурный плац! W/S — аллюр, Пробел — прыжок.');
+                }
+            }
+            updateHUD();
+        }
+
+        // Действия на развязках
+        document.getElementById('toolBrushBtn').addEventListener('click', () => {
+            if (state.horse.cleanliness >= 100) {
+                showToast('Шерсть уже сияет идеальной чистотой! ✨');
+                return;
+            }
+            state.horse.cleanliness = Math.min(100, state.horse.cleanliness + 20);
+            state.coins += 5;
+            playChime(['E5', 'G5']);
+            showToast(`Вы почистили лошадь щёткой! Чистота: ${state.horse.cleanliness}% (+5 🪙)`);
+            updateHUD();
+        });
+
+        document.getElementById('toolHoofBtn').addEventListener('click', () => {
+            state.horse.cleanliness = Math.min(100, state.horse.cleanliness + 15);
+            state.horse.energy = Math.min(100, state.horse.energy + 5);
+            state.coins += 5;
+            playChime(['D5', 'A5']);
+            showToast('Копыта раскрючкованы! Лошади комфортно (+5 🪙)');
+            updateHUD();
+        });
+
+        document.getElementById('toolTreatBtn').addEventListener('click', () => {
+            if (state.horse.energy >= 100) {
+                showToast('Лошадь сыта и полна сил! 🥕');
+                return;
+            }
+            state.horse.energy = Math.min(100, state.horse.energy + 20);
+            playChime(['C5', 'E5', 'G5', 'C6']);
+            showToast(`Хрум-хрум! Энергия восстановлена до ${state.horse.energy}%`);
+            updateHUD();
+        });
+
+        document.getElementById('toolSaddleBtn').addEventListener('click', () => {
+            state.horse.hasSaddle = !state.horse.hasSaddle;
+            saddleGroup.visible = state.horse.hasSaddle;
+            playHoofSound('G2');
+            showToast(state.horse.hasSaddle ? 'Вальтрап и седло надеты!' : 'Седло снято.');
+            updateHUD();
+        });
+
+        document.getElementById('toolBridleBtn').addEventListener('click', () => {
+            state.horse.hasBridle = !state.horse.hasBridle;
+            bridleGroup.visible = state.horse.hasBridle;
+            playHoofSound('A2');
+            showToast(state.horse.hasBridle ? 'Уздечка с трензелем надета!' : 'Уздечка снята.');
+            updateHUD();
+        });
+
+        // Переключение режимов
+        document.getElementById('modeStablesBtn').addEventListener('click', () => switchMode('stables'));
+        document.getElementById('modeArenaBtn').addEventListener('click', () => switchMode('arena'));
+
+        // Кастомизация
+        document.getElementById('openCustomBtn').addEventListener('click', () => {
+            document.getElementById('customModal').classList.remove('hidden');
+        });
+        document.getElementById('closeCustomBtn').addEventListener('click', () => {
+            document.getElementById('customModal').classList.add('hidden');
+        });
+
+        document.querySelectorAll('.coat-swatch').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.coat-swatch').forEach(b => b.classList.remove('border-2', 'border-amber-400'));
+                btn.classList.add('border-2', 'border-amber-400');
+                state.horse.coatColor = btn.dataset.coat;
+                coatMat.color.set(state.horse.coatColor);
+            });
+        });
+
+        document.querySelectorAll('.mane-swatch').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.mane-swatch').forEach(b => b.classList.remove('border-2', 'border-amber-400'));
+                btn.classList.add('border-2', 'border-amber-400');
+                state.horse.maneColor = btn.dataset.mane;
+                maneMat.color.set(state.horse.maneColor);
+            });
+        });
+
+        document.querySelectorAll('.pad-swatch').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.pad-swatch').forEach(b => b.classList.remove('border-2', 'border-amber-400'));
+                btn.classList.add('border-2', 'border-amber-400');
+                state.horse.padColor = btn.dataset.pad;
+                padMat.color.set(state.horse.padColor);
+            });
+        });
+
+        document.getElementById('saveCustomBtn').addEventListener('click', () => {
+            const val = document.getElementById('horseNameInput').value.trim();
+            if (val) state.horse.name = val;
+            document.getElementById('customModal').classList.add('hidden');
+            playChime(['E5', 'B5']);
+            showToast(`Образ для ${state.horse.name} сохранён!`);
+            updateHUD();
+        });
+
+        // Звук
+        document.getElementById('soundToggleBtn').addEventListener('click', () => {
+            state.soundEnabled = !state.soundEnabled;
+            document.getElementById('soundToggleBtn').textContent = state.soundEnabled ? '🔊' : '🔇';
+        });
+
+        // ==========================================
+        // 8. УПРАВЛЕНИЕ В МАНЕЖЕ И МЕХАНИКА ПРЫЖКА
+        // ==========================================
+        function changeGait(delta) {
+            if (state.mode !== 'arena') return;
+            const maxGait = state.horse.energy > 15 ? 4 : 2;
+            state.gait = Math.max(0, Math.min(maxGait, state.gait + delta));
+            updateHUD();
+        }
+
+        // Проверка дистанции до ближайшего барьера для шкалы темпа
+        function getClosestJumpInfo() {
+            let best = null;
+            let bestDist = 18;
+            const forward = new THREE.Vector3(Math.sin(state.heading), 0, Math.cos(state.heading));
+
+            for (const obs of jumpObstacles) {
+                const toObs = new THREE.Vector3().subVectors(obs.pos, state.pos);
+                const dist = toObs.length();
+                if (dist < bestDist) {
+                    const dir = toObs.clone().normalize();
+                    const dot = forward.dot(dir);
+                    if (dot > 0.65) { // Барьер впереди по курсу
+                        best = obs;
+                        bestDist = dist;
+                    }
+                }
+            }
+            return best ? { obstacle: best, distance: bestDist } : null;
+        }
+
+        function triggerJump() {
+            if (state.mode !== 'arena' || state.isJumping) return;
+            if (state.gait === 0) {
+                showToast('Разгоните лошадь хотя бы до Рыси или Галопа для прыжка!');
+                return;
+            }
+
+            const jumpInfo = getClosestJumpInfo();
+            let boost = 1.0;
+
+            if (jumpInfo) {
+                // Идеальная точка отталкивания: 3.2 - 5.8 метра до барьера
+                const d = jumpInfo.distance;
+                if (d >= 3.0 && d <= 6.2) {
+                    state.jumpQuality = 'perfect';
+                    boost = 1.18;
+                    showToast('🌟 Идеальный темп прыжка!');
+                    playChime(['G5', 'C6']);
+                } else if (d < 3.0) {
+                    state.jumpQuality = 'late';
+                    boost = 0.88;
+                    showToast('⚠️ Слишком близко к барьеру!');
+                } else {
+                    state.jumpQuality = 'early';
+                    boost = 0.92;
+                    showToast('⚠️ Слишком ранний толчок!');
+                }
+            } else {
+                state.jumpQuality = 'normal';
+            }
+
+            state.isJumping = true;
+            state.jumpVelY = (6.8 + state.gait * 0.55) * boost;
+            state.horse.energy = Math.max(5, state.horse.energy - 3);
+            playHoofSound('C2');
+            updateHUD();
+        }
+
+        // Маршрут конкура
+        function toggleCourse() {
+            state.courseActive = !state.courseActive;
+            const btnText = document.getElementById('courseBtnText');
+            const hud = document.getElementById('courseHud');
+
+            if (state.courseActive) {
+                state.courseTime = 0;
+                state.jumpsCleared = 0;
+                state.faults = 0;
+                jumpObstacles.forEach(obs => {
+                    obs.cleared = false;
+                    obs.knocked = false;
+                    obs.bars.forEach((b, i) => {
+                        b.position.y = obs.height * (i === 0 ? 0.55 : 1);
+                        b.rotation.set(0, 0, 0);
+                    });
+                });
+                btnText.textContent = 'Завершить маршрут';
+                hud.classList.remove('hidden');
+                document.getElementById('jumpsTotalDisplay').textContent = jumpObstacles.length;
+                document.getElementById('jumpsClearedDisplay').textContent = '0';
+                document.getElementById('faultsDisplay').textContent = '0';
+                playChime(['C5', 'G5']);
+                showToast('🏁 Маршрут конкура начат! Прыгните все 6 барьеров!');
+            } else {
+                btnText.textContent = 'Начать конкур';
+                hud.classList.add('hidden');
+            }
+        }
+
+        document.getElementById('startCourseBtn').addEventListener('click', toggleCourse);
+        document.getElementById('gaitUpBtn').addEventListener('click', () => changeGait(1));
+        document.getElementById('gaitDownBtn').addEventListener('click', () => changeGait(-1));
+        document.getElementById('jumpBtn').addEventListener('click', triggerJump);
+
+        // Кнопки поворота для тач-экранов
+        const leftBtn = document.getElementById('turnLeftBtn');
+        const rightBtn = document.getElementById('turnRightBtn');
+        leftBtn.addEventListener('pointerdown', () => state.turnInput = 1);
+        leftBtn.addEventListener('pointerup', () => state.turnInput = 0);
+        leftBtn.addEventListener('pointerleave', () => state.turnInput = 0);
+        rightBtn.addEventListener('pointerdown', () => state.turnInput = -1);
+        rightBtn.addEventListener('pointerup', () => state.turnInput = 0);
+        rightBtn.addEventListener('pointerleave', () => state.turnInput = 0);
+
+        // Клавиатура (WASD / Стрелки / Пробел)
+        const keys = {};
+        window.addEventListener('keydown', (e) => {
+            if (document.activeElement.tagName === 'INPUT') return;
+            if (!keys[e.code]) {
+                if (e.code === 'KeyW' || e.code === 'ArrowUp') changeGait(1);
+                if (e.code === 'KeyS' || e.code === 'ArrowDown') changeGait(-1);
+                if (e.code === 'Space') {
+                    e.preventDefault();
+                    triggerJump();
+                }
+            }
+            keys[e.code] = true;
+        });
+        window.addEventListener('keyup', (e) => {
+            keys[e.code] = false;
+        });
+
+        // Старт игры
+        document.getElementById('startBtn').addEventListener('click', async () => {
+            try {
+                await Tone.start();
+                initAudio();
+            } catch (e) {}
+
+            state.started = true;
+            document.getElementById('startScreen').classList.add('hidden');
+            document.getElementById('hudTop').classList.remove('hidden');
+            switchMode('stables');
+            playChime(['C5', 'E5', 'G5']);
+        });
+
+        // ==========================================
+        // 9. АНИМАЦИЯ ЛОШАДИ И ФИЗИЧЕСКИЙ ЦИКЛ
+        // ==========================================
+        const clock = new THREE.Clock();
+        let animTime = 0;
+
+        function updateHorseAnimation(dt) {
+            animTime += dt;
+
+            // В режиме развязок — спокойное дыхание и взмахи хвостом
+            if (state.mode === 'stables') {
+                horseBodyGroup.position.y = 1.38 + Math.sin(animTime * 2.2) * 0.015;
+                neckPivot.rotation.x = Math.sin(animTime * 1.5) * 0.04;
+                headPivot.rotation.y = Math.sin(animTime * 0.9) * 0.08;
+                tailPivot.rotation.z = Math.sin(animTime * 2.5) * 0.14;
+                legs.forEach(leg => {
+                    leg.hip.rotation.x = 0;
+                    leg.knee.rotation.x = 0;
+                });
+                return;
+            }
+
+            // Плавный разгон/торможение
+            const targetSpeed = state.gaitSpeeds[state.gait];
+            state.speed += (targetSpeed - state.speed) * Math.min(1, dt * 4.5);
+
+            // Повороты (уздечка улучшает управляемость)
+            const bridleBonus = state.horse.hasBridle ? 1.0 : 0.65;
+            let turnDir = state.turnInput;
+            if (keys['KeyA'] || keys['ArrowLeft']) turnDir += 1;
+            if (keys['KeyD'] || keys['ArrowRight']) turnDir -= 1;
+
+            if (turnDir !== 0) {
+                const turnRate = (state.gait === 0 ? 1.3 : 1.85) * bridleBonus;
+                state.heading += turnDir * turnRate * dt;
+                horseBodyGroup.rotation.z = THREE.MathUtils.lerp(horseBodyGroup.rotation.z, -turnDir * 0.12, dt * 6);
+            } else {
+                horseBodyGroup.rotation.z = THREE.MathUtils.lerp(horseBodyGroup.rotation.z, 0, dt * 6);
+            }
+
+            // Перемещение по манежу с ограничением внутри ограждения
+            const vx = Math.sin(state.heading) * state.speed;
+            const vz = Math.cos(state.heading) * state.speed;
+            state.pos.x = THREE.MathUtils.clamp(state.pos.x + vx * dt, -30.2, 30.2);
+            state.pos.z = THREE.MathUtils.clamp(state.pos.z + vz * dt, -46.2, 46.2);
+
+            // Физика прыжка
+            if (state.isJumping) {
+                state.jumpY += state.jumpVelY * dt;
+                state.jumpVelY -= 21.5 * dt; // Гравитация
+
+                // Наклон корпуса на взлёте и приземлении
+                horseBodyGroup.rotation.x = THREE.MathUtils.clamp(-state.jumpVelY * 0.055, -0.42, 0.42);
+
+                if (state.jumpY <= 0) {
+                    state.jumpY = 0;
+                    state.isJumping = false;
+                    horseBodyGroup.rotation.x = 0;
+                    playHoofSound('A1');
+                }
+            }
+
+            horseRoot.position.set(state.pos.x, state.jumpY, state.pos.z);
+            horseRoot.rotation.y = state.heading;
+
+            // Кинематика ног и звук копыт в зависимости от аллюра
+            if (state.isJumping) {
+                // Группировка ног в прыжке
+                legs.forEach(leg => {
+                    if (leg.isFront) {
+                        leg.hip.rotation.x = -0.95;
+                        leg.knee.rotation.x = 1.35;
+                    } else {
+                        leg.hip.rotation.x = 0.75;
+                        leg.knee.rotation.x = 0.85;
+                    }
+                });
+                neckPivot.rotation.x = 0.25;
+            } else if (state.speed > 0.3) {
+                const freq = 3.5 + state.speed * 0.42;
+                const cycle = animTime * freq;
+                const amp = Math.min(0.75, 0.22 + state.speed * 0.025);
+
+                // Звук удара копыт
+                const stepPhase = Math.floor(cycle / Math.PI);
+                if (stepPhase !== lastStepPhase) {
+                    lastStepPhase = stepPhase;
+                    playHoofSound(stepPhase % 2 === 0 ? 'C2' : 'D2');
+                }
+
+                horseBodyGroup.position.y = 1.38 + Math.abs(Math.sin(cycle)) * (0.03 + state.speed * 0.004);
+                neckPivot.rotation.x = Math.sin(cycle * 2) * 0.06;
+                tailPivot.rotation.x = 0.2 + Math.sin(cycle) * 0.15;
+
+                legs.forEach(leg => {
+                    // Диагональная рысь или асимметричный галоп
+                    let phaseOffset = 0;
+                    if (state.gait <= 2) {
+                        phaseOffset = (leg.isFront === leg.isLeft) ? 0 : Math.PI;
+                    } else {
+                        phaseOffset = (leg.isFront ? 0 : 1.1) + (leg.isLeft ? 0 : 0.45);
+                    }
+                    const s = Math.sin(cycle + phaseOffset);
+                    leg.hip.rotation.x = s * amp;
+                    leg.knee.rotation.x = Math.max(0, -s * amp * 1.35);
+                });
+            } else {
+                horseBodyGroup.position.y = 1.38 + Math.sin(animTime * 2) * 0.015;
+                neckPivot.rotation.x = 0;
+                legs.forEach(leg => {
+                    leg.hip.rotation.x = THREE.MathUtils.lerp(leg.hip.rotation.x, 0, dt * 8);
+                    leg.knee.rotation.x = THREE.MathUtils.lerp(leg.knee.rotation.x, 0, dt * 8);
+                });
+            }
+        }
+
+        function updateObstaclesAndCourse(dt) {
+            if (state.mode !== 'arena') return;
+
+            // Обновление шкалы расчёта темпа (Stride Meter)
+            const jumpInfo = getClosestJumpInfo();
+            const meterBox = document.getElementById('strideMeterBox');
+            const needle = document.getElementById('strideNeedle');
+            const hint = document.getElementById('strideHint');
+
+            if (jumpInfo && !state.isJumping && state.gait > 0) {
+                meterBox.classList.remove('hidden');
+                // Нормализуем дистанцию 18м -> 0%, 2м -> 100%
+                const pct = THREE.MathUtils.clamp(((18 - jumpInfo.distance) / 16) * 100, 0, 100);
+                needle.style.left = `${pct}%`;
+
+                if (jumpInfo.distance >= 3.0 && jumpInfo.distance <= 6.2) {
+                    hint.textContent = 'СЕЙЧАС! Жмите Прыжок!';
+                    hint.className = 'text-emerald-400 font-extrabold animate-pulse';
+                } else if (jumpInfo.distance < 3.0) {
+                    hint.textContent = 'Поздно!';
+                    hint.className = 'text-rose-400 font-bold';
+                } else {
+                    hint.textContent = 'Готовьтесь к толчку...';
+                    hint.className = 'text-amber-400';
+                }
+            } else {
+                meterBox.classList.add('hidden');
+            }
+
+            // Проверка прохождения или сбития барьеров
+            jumpObstacles.forEach(obs => {
+                const dist = state.pos.distanceTo(obs.pos);
+                if (dist < 1.85 && !obs.cleared && !obs.knocked) {
+                    if (state.jumpY >= obs.height * 0.72) {
+                        // Успешный чистый прыжок!
+                        obs.cleared = true;
+                        state.coins += 15;
+                        playChime(['C5', 'E5', 'G5', 'C6']);
+                        if (state.courseActive) {
+                            state.jumpsCleared++;
+                            document.getElementById('jumpsClearedDisplay').textContent = state.jumpsCleared;
+                            if (state.jumpsCleared >= jumpObstacles.length) {
+                                const bonus = state.faults === 0 ? 100 : 40;
+                                state.coins += bonus;
+                                showToast(`🏆 Маршрут пройден! Бонус +${bonus} 🪙`);
+                                toggleCourse();
+                            } else {
+                                showToast(`✅ Барьер взят! (${state.jumpsCleared}/${jumpObstacles.length})`);
+                            }
+                        } else {
+                            showToast('✅ Чистый прыжок! +15 🪙');
+                        }
+                        updateHUD();
+                    } else {
+                        // Закидка / Повал жердей
+                        obs.knocked = true;
+                        obs.bars.forEach((b, idx) => {
+                            b.position.y = 0.12 + idx * 0.08;
+                            b.rotation.z = (idx === 0 ? 0.15 : -0.18);
+                        });
+                        playFaultSound();
+                        if (state.courseActive) {
+                            state.faults += 4;
+                            document.getElementById('faultsDisplay').textContent = state.faults;
+                            showToast('❌ Повал жерди! +4 штрафных очка');
+                        } else {
+                            showToast('❌ Задели жердь! Прыгайте выше и вовремя.');
+                        }
+                    }
+                }
+            });
+
+            // Таймер маршрута
+            if (state.courseActive) {
+                state.courseTime += dt;
+                document.getElementById('timerDisplay').textContent = `${state.courseTime.toFixed(1)}с`;
+            }
+        }
+
+        function updateCamera(dt) {
+            if (state.mode === 'stables') {
+                const dist = 4.6;
+                const targetPos = new THREE.Vector3(
+                    Math.sin(camYaw) * Math.cos(camPitch) * dist,
+                    1.35 + Math.sin(camPitch) * dist,
+                    Math.cos(camYaw) * Math.cos(camPitch) * dist
+                );
+                camera.position.lerp(targetPos, Math.min(1, dt * 8));
+                camera.lookAt(0, 1.35, 0.15);
+            } else {
+                const totalYaw = state.heading + Math.PI + camYaw;
+                const dist = 6.2;
+                const targetPos = new THREE.Vector3(
+                    state.pos.x + Math.sin(totalYaw) * Math.cos(camPitch) * dist,
+                    state.pos.y + 1.8 + Math.sin(camPitch) * dist,
+                    state.pos.z + Math.cos(totalYaw) * Math.cos(camPitch) * dist
+                );
+                camera.position.lerp(targetPos, Math.min(1, dt * 10));
+                camera.lookAt(state.pos.x, state.pos.y + 1.55, state.pos.z);
+            }
+        }
+
+        // Главный цикл рендеринга
+        function animate() {
+            requestAnimationFrame(animate);
+            const dt = Math.min(clock.getDelta(), 0.05);
+
+            updateHorseAnimation(dt);
+            updateObstaclesAndCourse(dt);
+            updateCamera(dt);
+
+            renderer.render(scene, camera);
+        }
+
+        // Адаптация при изменении размера окна
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Запуск после загрузки окна
+        window.onload = function () {
+            updateHUD();
+            animate();
+        };
+    </script>
+</body>
+</html>
